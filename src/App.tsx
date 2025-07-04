@@ -10,6 +10,7 @@ import { DataExportImport } from './components/DataExportImport';
 import { ParticleBackground } from './components/ParticleBackground';
 import { UserStorage } from './utils/storage';
 import { temporalAPI } from './services/api';
+import { AnalyticsDashboard } from './components/AnalyticsDashboard';
 
 function App() {
   const [currentView, setCurrentView] = useState<'home' | 'dashboard' | 'wizard' | 'quantum'>('home');
@@ -80,6 +81,15 @@ function App() {
           <div className="space-y-8 pb-8">
             <Dashboard onStartDecision={() => setCurrentView('wizard')} />
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+              {/* --- Advanced Analytics Dashboard --- */}
+              {user?.id && (
+                <div className="mb-8">
+                  <React.Suspense fallback={<div className='text-gray-400'>Loading analytics...</div>}>
+                    {/** Dynamically import to avoid SSR issues if needed */}
+                    <AnalyticsDashboard userId={user.id} />
+                  </React.Suspense>
+                </div>
+              )}
               <div className="grid lg:grid-cols-2 gap-8">
                 <AdvancedTimeline timeframe="1_year" />
                 <DataExportImport />

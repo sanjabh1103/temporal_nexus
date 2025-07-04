@@ -1,7 +1,119 @@
 import { supabase, Decision, UserProfile, Simulation, TimingAnalysis } from './supabase';
 import { geminiService } from './gemini';
 
+// If VITE_API_BASE is defined, client will communicate with our Node/Express API instead of hitting Supabase directly.
+const API_BASE: string | undefined = import.meta.env.VITE_API_BASE;
+
 export class TemporalNexusAPI {
+  /**
+   * Fetch analytics summary (aggregate stats) for a user.
+   * @param userId - User ID
+   * @param params - Optional: { decisionType, from, to }
+   */
+  async getAnalyticsSummary(userId: string, params: { decisionType?: string; from?: string; to?: string } = {}) {
+    if (this.useApi) {
+      const q = new URLSearchParams({ userId, ...params }).toString();
+      return this.fetchApi(`/api/v1/analytics/summary?${q}`);
+    }
+    // Fallback: aggregate from local decisions
+    const decisions = this.getLocalDecisions().filter(d => d.user_id === userId);
+    // Optionally filter by type/date
+    const filtered = decisions.filter(d => {
+      if (params.decisionType && d.decision_type !== params.decisionType) return false;
+      if (params.from && d.created_at < params.from) return false;
+      if (params.to && d.created_at > params.to) return false;
+      return true;
+    });
+    const total = filtered.length;
+    const byType: Record<string, number> = {};
+    const byStatus: Record<string, number> = {};
+    let confidenceSum = 0, confidenceCount = 0;
+    filtered.forEach(d => {
+      byType[d.decision_type] = (byType[d.decision_type] || 0) + 1;
+      byStatus[d.status] = (byStatus[d.status] || 0) + 1;
+      if (typeof d.confidence === 'number') {
+        confidenceSum += d.confidence;
+        confidenceCount++;
+      }
+    });
+    const avgConfidence = confidenceCount ? confidenceSum / confidenceCount : null;
+    return { total, byType, byStatus, avgConfidence };
+  }
+
+  /**
+   * Fetch historical analytics (decisions, simulations, insights) for a user.
+   * @param userId - User ID
+   * @param params - Optional: { from, to }
+   */
+  async getAnalyticsHistory(userId: string, params: { from?: string; to?: string } = {}) {
+    if (this.useApi) {
+      const q = new URLSearchParams({ userId, ...params }).toString();
+      return this.fetchApi(`/api/v1/analytics/history?${q}`);
+    }
+    // Fallback: local only (no insights)
+    const decisions = this.getLocalDecisions().filter(d => d.user_id === userId &&
+      (!params.from || d.created_at >= params.from) && (!params.to || d.created_at <= params.to));
+    const simulations = this.getLocalSimulations().filter(s => {
+      const dec = decisions.find(d => d.id === s.decision_id);
+      return !!dec;
+    });
+    return { decisions, simulations, insights: [] };
+  }
+
+  /**
+   * Export all user analytics data as JSON or CSV.
+   * @param userId - User ID
+   * @param format - 'json' | 'csv'
+   */
+  async exportAnalyticsData(userId: string, format: 'json' | 'csv' = 'json') {
+    if (this.useApi) {
+      const q = new URLSearchParams({ userId, format }).toString();
+      return this.fetchApi(`/api/v1/analytics/export?${q}`);
+    }
+    // Fallback: local only, JSON
+    const decisions = this.getLocalDecisions().filter(d => d.user_id === userId);
+    const simulations = this.getLocalSimulations().filter(s => decisions.some(d => d.id === s.decision_id));
+    // No local insights
+    if (format === 'csv') {
+      // CSV export for decisions only
+      const fields = Object.keys(decisions[0] || {});
+      const csv = [fields.join(',')]
+        .concat(decisions.map(row => fields.map(f => JSON.stringify((row as any)[f] ?? '')).join(',')))
+        .join('\n');
+      return csv;
+    }
+    return { decisions, simulations, insights: [] };
+  }
+
+  /* ------------------------------------------------------------------
+   * Helper: determine whether to use backend API
+   * ------------------------------------------------------------------ */
+  private get useApi() {
+    return Boolean(API_BASE);
+  }
+
+  private async fetchApi(
+    path: string,
+    options: RequestInit & { jsonBody?: any } = {}
+  ) {
+    const { jsonBody, ...rest } = options;
+    const fetchOptions: RequestInit = {
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      credentials: 'include', // allow Supabase cookies if any
+      ...rest,
+    };
+    if (jsonBody) {
+      fetchOptions.body = JSON.stringify(jsonBody);
+    }
+    const res = await fetch(`${API_BASE}${path}`, fetchOptions);
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}));
+      throw new Error(errBody.error || res.statusText);
+    }
+    return res.json();
+  }
   // Authentication
   async signUp(email: string, password: string, name: string) {
     try {
@@ -44,6 +156,12 @@ export class TemporalNexusAPI {
   }
 
   async createGuestUser(name: string = 'Guest User') {
+    if (this.useApi) {
+      const guestId = `guest_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      const profile = await this.createUserProfile(guestId, name, undefined, true);
+      return { userId: guestId, profile };
+    }
+
     try {
       const guestId = `guest_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
       
@@ -58,7 +176,15 @@ export class TemporalNexusAPI {
   }
 
   // User Profile Management
-  async createUserProfile(id: string, name: string, email?: string, isGuest: boolean = false): Promise<UserProfile> {
+  async createUserProfile(id: string, name: string, email?: string, isGuest: boolean = false, profile_data: any = {}): Promise<UserProfile> {
+    if (this.useApi) {
+      const res = await this.fetchApi('/api/v1/user/profile', {
+        method: 'POST',
+        jsonBody: { id, name, email, is_guest: isGuest, profile_data },
+      });
+      return res;
+    }
+
     try {
       const profile: UserProfile = {
         id,
@@ -90,6 +216,11 @@ export class TemporalNexusAPI {
   }
 
   async getUserProfile(userId: string): Promise<UserProfile | null> {
+    if (this.useApi) {
+      const res = await this.fetchApi(`/api/v1/user/profile/${userId}`, { method: 'GET' });
+      return res;
+    }
+
     try {
       const { data, error } = await supabase
         .from('user_profiles')
@@ -111,6 +242,14 @@ export class TemporalNexusAPI {
   }
 
   async updateUserProfile(userId: string, updates: Partial<UserProfile>): Promise<UserProfile | null> {
+    if (this.useApi) {
+      const res = await this.fetchApi(`/api/v1/user/profile/${userId}`, {
+        method: 'PUT',
+        jsonBody: updates,
+      });
+      return res;
+    }
+
     try {
       const { data, error } = await supabase
         .from('user_profiles')
@@ -139,6 +278,19 @@ export class TemporalNexusAPI {
 
   // Decision Management
   async createDecision(decisionData: Omit<Decision, 'id' | 'created_at' | 'updated_at'>): Promise<Decision> {
+    // If API server present, delegate to backend
+    if (this.useApi) {
+      try {
+        const decision = await this.fetchApi('/decisions', {
+          method: 'POST',
+          jsonBody: decisionData,
+        });
+        // Trigger analysis via backend later (future work)
+        return decision;
+      } catch (error) {
+        console.error('Backend createDecision error, falling back to Supabase:', error);
+      }
+    }
     try {
       const decision: Decision = {
         ...decisionData,
@@ -177,6 +329,13 @@ export class TemporalNexusAPI {
   }
 
   async getDecision(decisionId: string): Promise<Decision | null> {
+    if (this.useApi) {
+      try {
+        return await this.fetchApi(`/decisions/${decisionId}`);
+      } catch (error) {
+        console.warn('Backend getDecision failed, falling back:', error);
+      }
+    }
     try {
       const { data, error } = await supabase
         .from('decisions')
@@ -198,6 +357,13 @@ export class TemporalNexusAPI {
   }
 
   async getUserDecisions(userId: string): Promise<Decision[]> {
+    if (this.useApi) {
+      try {
+        return await this.fetchApi(`/decisions?user_id=${encodeURIComponent(userId)}`);
+      } catch (error) {
+        console.warn('Backend listDecisions failed, falling back:', error);
+      }
+    }
     try {
       const { data, error } = await supabase
         .from('decisions')
@@ -218,6 +384,16 @@ export class TemporalNexusAPI {
   }
 
   async updateDecision(decisionId: string, updates: Partial<Decision>): Promise<Decision | null> {
+    if (this.useApi) {
+      try {
+        return await this.fetchApi(`/decisions/${decisionId}`, {
+          method: 'PUT',
+          jsonBody: updates,
+        });
+      } catch (error) {
+        console.warn('Backend updateDecision failed, falling back:', error);
+      }
+    }
     try {
       const updatedData = {
         ...updates,
@@ -294,6 +470,23 @@ export class TemporalNexusAPI {
 
   // Timing Analysis
   async performTimingAnalysis(decisionId: string, timeframe: string): Promise<any> {
+    if (this.useApi) {
+      // Start job
+      const jobRes = await this.fetchApi('/api/v1/timing-analysis', {
+        method: 'POST',
+        jsonBody: { decisionId, decisionType: 'timing_analysis', parameters: { timeframe } },
+      });
+      // Poll job
+      let status = jobRes.status;
+      let pollRes;
+      while (status === 'queued' || status === 'running') {
+        await new Promise(r => setTimeout(r, 1000));
+        pollRes = await this.fetchApi(`/api/v1/timing-analysis/${jobRes.jobId}`, { method: 'GET' });
+        status = pollRes.status;
+      }
+      return pollRes.result;
+    }
+
     try {
       const decision = await this.getDecision(decisionId);
       if (!decision) throw new Error('Decision not found');
@@ -328,6 +521,23 @@ export class TemporalNexusAPI {
 
   // Simulation Management
   async runSimulation(decisionId: string, simulationType: string, parameters: any): Promise<Simulation> {
+    if (this.useApi) {
+      // Start job
+      const jobRes = await this.fetchApi('/api/v1/simulations', {
+        method: 'POST',
+        jsonBody: { decisionId, decisionType: simulationType, parameters },
+      });
+      // Poll job
+      let status = jobRes.status;
+      let pollRes;
+      while (status === 'queued' || status === 'running') {
+        await new Promise(r => setTimeout(r, 1000));
+        pollRes = await this.fetchApi(`/api/v1/simulations/${jobRes.jobId}`, { method: 'GET' });
+        status = pollRes.status;
+      }
+      return { ...pollRes.result, id: jobRes.jobId, decision_id: decisionId, simulation_type: simulationType, parameters, status };
+    }
+
     try {
       const decision = await this.getDecision(decisionId);
       if (!decision) throw new Error('Decision not found');
