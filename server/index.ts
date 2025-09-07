@@ -1,6 +1,6 @@
-import express from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
-import dotenv from 'dotenv';
+import * as dotenv from 'dotenv';
 import { createClient } from '@supabase/supabase-js';
 
 dotenv.config();
@@ -17,7 +17,7 @@ app.use(cors());
 app.use(express.json());
 
 // Helper to wrap async route handlers for Express+TS
-const asyncHandler = (fn: any) => (req: any, res: any, next: any) => Promise.resolve(fn(req, res, next)).catch(next);
+const asyncHandler = (fn: (req: Request, res: Response, next: NextFunction) => Promise<any>) => (req: Request, res: Response, next: NextFunction) => Promise.resolve(fn(req, res, next)).catch(next);
 
 // ---------------- Authentication ----------------
 
@@ -108,7 +108,7 @@ app.post('/api/v1/auth/login', asyncHandler(async (req: any, res: any) => {
 import { DecisionSchema, SimulationSchema, SimulationParameterSchemas } from './validationSchemas';
 
 // Create Decision
-app.post('/api/v1/decisions', async (req, res) => {
+app.post('/api/v1/decisions', asyncHandler(async (req: any, res: any) => {
   // Validate decision payload
   const parseResult = DecisionSchema.safeParse(req.body);
   if (!parseResult.success) {
@@ -126,61 +126,40 @@ app.post('/api/v1/decisions', async (req, res) => {
     res.json(data);
   } catch (err: unknown) {
     res.status(500).json({ error: (err as Error).message });
-    res.status(500).json({ error: (err as Error).message });
   }
-});
+}));
 
 // Read Decision
-app.get('/api/v1/decisions/:id', async (req, res) => {
-  try {
-    const { data, error } = await supabase.from('decisions').select('*').eq('id', req.params.id).single();
-    if (error) throw error;
-    res.json(data);
-  } catch (err: unknown) {
-    res.status(500).json({ error: (err as Error).message });
-    res.status(404).json({ error: 'Not found' });
-  }
-});
+app.get('/api/v1/decisions/:id', asyncHandler(async (req: Request, res: Response) => {
+  const { data, error } = await supabase.from('decisions').select('*').eq('id', req.params.id).single();
+  if (error) throw error;
+  res.json(data);
+}));
 
 // List Decisions
-app.get('/api/v1/decisions', async (_req, res) => {
-  try {
-    const { data, error } = await supabase
-      .from('decisions')
-      .select('*')
-      .order('created_at', { ascending: false });
-    if (error) throw error;
-    res.json(data);
-  } catch (err: unknown) {
-    res.status(500).json({ error: (err as Error).message });
-    res.status(500).json({ error: (err as Error).message });
-  }
-});
+app.get('/api/v1/decisions', asyncHandler(async (_req: Request, res: Response) => {
+  const { data, error } = await supabase
+    .from('decisions')
+    .select('*')
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  res.json(data);
+}));
 
 // Update Decision
-app.put('/api/v1/decisions/:id', async (req, res) => {
-  try {
-    const updates = { ...req.body, updated_at: new Date().toISOString() };
-    const { data, error } = await supabase.from('decisions').update(updates).eq('id', req.params.id).select().single();
-    if (error) throw error;
-    res.json(data);
-  } catch (err: unknown) {
-    res.status(500).json({ error: (err as Error).message });
-    res.status(500).json({ error: (err as Error).message });
-  }
-});
+app.put('/api/v1/decisions/:id', asyncHandler(async (req: Request, res: Response) => {
+  const updates = { ...req.body, updated_at: new Date().toISOString() };
+  const { data, error } = await supabase.from('decisions').update(updates).eq('id', req.params.id).select().single();
+  if (error) throw error;
+  res.json(data);
+}));
 
 // Delete Decision
-app.delete('/api/v1/decisions/:id', async (req, res) => {
-  try {
-    const { error } = await supabase.from('decisions').delete().eq('id', req.params.id);
-    if (error) throw error;
-    res.json({ status: 'deleted' });
-  } catch (err: unknown) {
-    res.status(500).json({ error: (err as Error).message });
-    res.status(500).json({ error: (err as Error).message });
-  }
-});
+app.delete('/api/v1/decisions/:id', asyncHandler(async (req: Request, res: Response) => {
+  const { error } = await supabase.from('decisions').delete().eq('id', req.params.id);
+  if (error) throw error;
+  res.json({ status: 'deleted' });
+}));
 
 // --- Sprint 2: Advanced AI endpoints ---
 
@@ -205,7 +184,7 @@ app.post('/api/v1/simulations', asyncHandler(async (req: any, res: any) => {
   }
   const { decisionId, decisionType, parameters } = req.body;
   // Validate simulation parameters by type
-  const paramSchema = SimulationParameterSchemas[decisionType];
+  const paramSchema = SimulationParameterSchemas[decisionType as keyof typeof SimulationParameterSchemas];
   if (paramSchema) {
     const paramResult = paramSchema.safeParse(parameters);
     if (!paramResult.success) {
@@ -257,7 +236,7 @@ app.post('/api/v1/timing-analysis', asyncHandler(async (req: any, res: any) => {
   }
   const { decisionId, decisionType, parameters } = req.body;
   // Validate timing parameters by type
-  const paramSchema = SimulationParameterSchemas[decisionType];
+  const paramSchema = SimulationParameterSchemas[decisionType as keyof typeof SimulationParameterSchemas];
   if (paramSchema) {
     const paramResult = paramSchema.safeParse(parameters);
     if (!paramResult.success) {

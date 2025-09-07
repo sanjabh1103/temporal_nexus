@@ -23,6 +23,7 @@ export const DecisionWizard: React.FC<DecisionWizardProps> = ({ onComplete }) =>
   const { createDecision } = useDecisions(user?.id || '');
 
   const decisionTypes = [
+    // Original Temporal Nexus user stories
     {
       id: 'career_change',
       title: 'Career Change',
@@ -90,6 +91,77 @@ export const DecisionWizard: React.FC<DecisionWizardProps> = ({ onComplete }) =>
       id: 'personal_development',
       title: 'Personal Development',
       description: 'Plan learning and skill development',
+      icon: Zap,
+      color: 'temporal'
+    },
+    // Strategic Intelligence Platform user stories from part2.md
+    {
+      id: 'strategic_decision_maker',
+      title: 'Strategic Decision Maker',
+      description: 'Analyze complex strategic decisions with AI guidance',
+      icon: Brain,
+      color: 'temporal'
+    },
+    {
+      id: 'policy_analyst',
+      title: 'Policy Analyst',
+      description: 'Simulate geopolitical scenarios and policy outcomes',
+      icon: Users,
+      color: 'collective'
+    },
+    {
+      id: 'investment_research_analyst',
+      title: 'Investment Research Analyst',
+      description: 'Combine market predictions with formal verification',
+      icon: TrendingUp,
+      color: 'quantum'
+    },
+    {
+      id: 'adaptive_learning_student',
+      title: 'Adaptive Learning Student',
+      description: 'AI tutor that adapts to your knowledge level',
+      icon: Brain,
+      color: 'temporal'
+    },
+    {
+      id: 'market_trend_analyst',
+      title: 'Market Trend Analyst',
+      description: 'Simulate market dynamics with multi-agent models',
+      icon: Clock,
+      color: 'quantum'
+    },
+    {
+      id: 'research_scientist',
+      title: 'Research Scientist',
+      description: 'Generate hypotheses and experimental designs',
+      icon: Sparkles,
+      color: 'collective'
+    },
+    {
+      id: 'financial_model_validator',
+      title: 'Financial Model Validator',
+      description: 'Formally verify financial models for correctness',
+      icon: Zap,
+      color: 'temporal'
+    },
+    {
+      id: 'collaborative_predictor',
+      title: 'Collaborative Predictor',
+      description: 'Participate in prediction markets with AI refinement',
+      icon: Users,
+      color: 'collective'
+    },
+    {
+      id: 'complex_system_educator',
+      title: 'Complex System Educator',
+      description: 'Create interactive simulations of emergent behaviors',
+      icon: Brain,
+      color: 'quantum'
+    },
+    {
+      id: 'integrated_intelligence_user',
+      title: 'Integrated Intelligence User',
+      description: 'Seamlessly switch between different AI tools',
       icon: Zap,
       color: 'temporal'
     }
