@@ -13,8 +13,60 @@ if (!supabaseUrl || !supabaseAnonKey) {
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 const app = express();
-app.use(cors());
-app.use(express.json());
+
+// Security middleware
+app.use((req, res, next) => {
+  // Remove X-Powered-By header
+  res.removeHeader('X-Powered-By');
+
+  // Set security headers
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('X-XSS-Protection', '1; mode=block');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+
+  // Content Security Policy for API
+  res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'none'; object-src 'none'");
+
+  next();
+});
+
+app.use(cors({
+  origin: process.env.NODE_ENV === 'production'
+    ? ['https://yourdomain.com'] // Replace with your actual domain
+    : ['http://localhost:5173', 'http://localhost:3000'],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
+app.use(express.json({ limit: '10mb' })); // Limit payload size
+
+// Rate limiting middleware
+const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
+const RATE_LIMIT_WINDOW = 15 * 60 * 1000; // 15 minutes
+const RATE_LIMIT_MAX = 100; // requests per window
+
+app.use((req: Request, res: Response, next: NextFunction) => {
+  const clientIP = req.ip || (req as any).connection?.remoteAddress || 'unknown';
+  const now = Date.now();
+  const clientData = rateLimitMap.get(clientIP);
+
+  if (!clientData || now > clientData.resetTime) {
+    rateLimitMap.set(clientIP, { count: 1, resetTime: now + RATE_LIMIT_WINDOW });
+    return next();
+  }
+
+  if (clientData.count >= RATE_LIMIT_MAX) {
+    return res.status(429).json({
+      error: 'Too many requests',
+      retryAfter: Math.ceil((clientData.resetTime - now) / 1000)
+    });
+  }
+
+  clientData.count++;
+  next();
+});
 
 // Helper to wrap async route handlers for Express+TS
 const asyncHandler = (fn: (req: Request, res: Response, next: NextFunction) => Promise<any>) => (req: Request, res: Response, next: NextFunction) => Promise.resolve(fn(req, res, next)).catch(next);
